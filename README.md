@@ -13,7 +13,9 @@ The port follows the original listing almost line by line: it emulates the Amiga
 
 ## How to play
 
-Download or clone the repository and open `index.html` in a web browser. No installation required.
+**Play it online: https://mikehesser.github.io/Ludo/**
+
+Or download the repository and open `index.html` in a web browser. No installation required.
 
 1. On the title screen choose the number of players (1–4) and click `WEITER`.
 2. Enter the name of each player and press `Enter`. If you leave a name empty, the player is called "FAULPELZ" (lazybones).

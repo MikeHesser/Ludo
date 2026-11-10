@@ -13,7 +13,9 @@ Die Portierung folgt dem Original-Listing fast Zeile für Zeile: Sie bildet den 
 
 ## Spielen
 
-Repository herunterladen oder klonen und `index.html` im Webbrowser öffnen. Keine Installation nötig.
+**Online spielen: https://mikehesser.github.io/Ludo/**
+
+Oder das Repository herunterladen und `index.html` im Webbrowser öffnen. Keine Installation nötig.
 
 1. Im Titelbild die Anzahl der Spieler (1–4) wählen und auf `WEITER` klicken.
 2. Die Namen der Spieler eingeben und mit `Enter` bestätigen. Wer keinen Namen eingibt, heißt „FAULPELZ“.
