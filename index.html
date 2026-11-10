@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mensch ärgere dich nicht</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=block">
+<style>
+  :root { --bg:#111; --fg:#bbb; --dim:#777; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:13px/1.4 system-ui, sans-serif; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:0 16px; box-sizing:border-box; }
+  canvas { image-rendering:pixelated; image-rendering:crisp-edges; display:block;
+    box-shadow:0 0 0 2px #333, 0 10px 40px #000; cursor:pointer; touch-action:manipulation; }
+  #hint { color:var(--dim); text-align:center; max-width:960px; }
+  #hint kbd { border:1px solid #444; border-radius:3px; padding:0 4px; color:var(--fg); }
+  #nameinput { position:fixed; left:0; bottom:0; width:1px; height:1px; opacity:0; font-size:16px; border:0; padding:0; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="320" height="256"></canvas>
+<div id="hint">Nachbau von „Mensch ärgere dich nicht“ (GFA-BASIC, Amiga, 1989) ·
+  Würfeln: Knopf anklicken oder <kbd>Leertaste</kbd> · Kegel wählen: <kbd>1</kbd>–<kbd>4</kbd> oder Kegel anklicken</div>
+<input id="nameinput" autocomplete="off" autocapitalize="characters" spellcheck="false">
+<script>
+'use strict';
+/* =====================================================================
+   Mini-GFA-Grafikschicht: indizierter 320x256-Framebuffer, 16 Farben,
+   Amiga-Palette (4 Bit je Kanal). Palettenwechsel wirken – wie auf dem
+   Amiga – sofort auf alles bereits Gezeichnete.
+   ===================================================================== */
+const W = 320, H = 256;
+const cv = document.getElementById('screen');
+const ctx = cv.getContext('2d');
+const fb = new Uint8Array(W * H);
+const pal = Array.from({ length: 16 }, () => [0, 0, 0]);
+let dirty = true;
+
+function setcolor(i, r, g, b) { pal[i] = [r, g, b]; dirty = true; }
+function plot(x, y, c) {
+  x |= 0; y |= 0;
+  if (x >= 0 && x < W && y >= 0 && y < H) { fb[y * W + x] = c; dirty = true; }
+}
+function point(x, y) { return (x >= 0 && x < W && y >= 0 && y < H) ? fb[y * W + x] : 0; }
+function cls(c = 0) { fb.fill(c); dirty = true; }
+function line(x0, y0, x1, y1, c) {
+  x0 |= 0; y0 |= 0; x1 |= 0; y1 |= 0;
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    plot(x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+// DRAW x,y TO x,y TO ...  /  DRAW TO x,y (setzt beim letzten Punkt fort)
+let lastX = 0, lastY = 0;
+function draw(c, ...p) {
+  lastX = p[0]; lastY = p[1];
+  if (p.length === 2) plot(lastX, lastY, c);
+  for (let i = 2; i < p.length; i += 2) drawTo(c, p[i], p[i + 1]);
+}
+function drawTo(c, x, y) { line(lastX, lastY, x, y, c); lastX = x; lastY = y; }
+function pbox(x0, y0, x1, y1, c) {
+  if (x0 > x1) [x0, x1] = [x1, x0];
+  if (y0 > y1) [y0, y1] = [y1, y0];
+  x0 = Math.max(0, x0 | 0); y0 = Math.max(0, y0 | 0);
+  x1 = Math.min(W - 1, x1 | 0); y1 = Math.min(H - 1, y1 | 0);
+  for (let y = y0; y <= y1; y++) fb.fill(c, y * W + x0, y * W + x1 + 1);
+  dirty = true;
+}
+function box(x0, y0, x1, y1, c) {
+  line(x0, y0, x1, y0, c); line(x1, y0, x1, y1, c);
+  line(x1, y1, x0, y1, c); line(x0, y1, x0, y0, c);
+}
+function prbox(x0, y0, x1, y1, c) { // gefüllte Box mit abgerundeten Ecken
+  const r = 4;
+  for (let y = y0; y <= y1; y++) {
+    const d = Math.min(y - y0, y1 - y);
+    const inset = d < r ? Math.round(r - Math.sqrt(r * r - (r - d) * (r - d))) : 0;
+    pbox(x0 + inset, y, x1 - inset, y, c);
+  }
+}
+function pcircle(cx, cy, r, c) {
+  for (let dy = -r; dy <= r; dy++) {
+    const dx = Math.round(Math.sqrt(r * r - dy * dy));
+    pbox(cx - dx, cy + dy, cx + dx, cy + dy, c);
+  }
+}
+// FILL: füllt die zusammenhängende Fläche gleicher Farbe (Flood, Modus 1)
+function fill(x, y, c) {
+  if (x < 0 || x >= W || y < 0 || y >= H) return;
+  const target = fb[y * W + x];
+  if (target === c) return;
+  const st = [x, y];
+  while (st.length) {
+    const py = st.pop(), px = st.pop();
+    if (px < 0 || px >= W || py < 0 || py >= H || fb[py * W + px] !== target) continue;
+    fb[py * W + px] = c;
+    st.push(px + 1, py, px - 1, py, px, py + 1, px, py - 1);
+  }
+  dirty = true;
+}
+// POLYFILL n,x(),y() OFFSET ox,oy
+function polyfill(n, xs, ys, ox, oy, c) {
+  let ymin = Infinity, ymax = -Infinity;
+  for (let i = 0; i < n; i++) { ymin = Math.min(ymin, ys[i]); ymax = Math.max(ymax, ys[i]); }
+  for (let y = ymin; y <= ymax; y++) {
+    const xsct = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ya = ys[i], yb = ys[j];
+      if (ya === yb) continue;
+      if ((y >= ya && y < yb) || (y >= yb && y < ya))
+        xsct.push(xs[i] + (y - ya) * (xs[j] - xs[i]) / (yb - ya));
+    }
+    xsct.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xsct.length; k += 2)
+      pbox(Math.round(xsct[k]) + ox, y + oy, Math.round(xsct[k + 1]) + ox, y + oy, c);
+  }
+  for (let i = 0; i < n - 1; i++) line(xs[i] + ox, ys[i] + oy, xs[i + 1] + ox, ys[i + 1] + oy, c);
+}
+// GET / PUT
+function get(x0, y0, x1, y1) {
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, d = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) d[y * w + x] = point(x0 + x, y0 + y);
+  return { w, h, d };
+}
+function put(x0, y0, img, mode = 'copy') {
+  for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) {
+    const px = x0 + x, py = y0 + y;
+    if (px < 0 || px >= W || py < 0 || py >= H) continue;
+    const s = img.d[y * img.w + x];
+    fb[py * W + px] = mode === 'xor' ? (fb[py * W + px] ^ s) : s; // &H60 = B XOR C
+  }
+  dirty = true;
+}
+
+/* ---------- Text (8x8-Pixelfont, Topaz-Ersatz) ---------- */
+const gcan = document.createElement('canvas'); gcan.width = 8; gcan.height = 16;
+const gctx = gcan.getContext('2d', { willReadFrequently: true });
+let FONT = '8px "Press Start 2P"';
+const glyphs = new Map();
+let capBottom = 12;
+function glyph(ch) {
+  let g = glyphs.get(ch);
+  if (g) return g;
+  gctx.clearRect(0, 0, 8, 16);
+  gctx.font = FONT; gctx.fillStyle = '#fff'; gctx.textBaseline = 'alphabetic';
+  gctx.fillText(ch, 0, 12);
+  const id = gctx.getImageData(0, 0, 8, 16).data;
+  g = new Uint8Array(8 * 16);
+  for (let i = 0; i < 128; i++) g[i] = id[i * 4 + 3] >= 128 ? 1 : 0;
+  glyphs.set(ch, g);
+  return g;
+}
+function calibrateFont() {
+  glyphs.clear();
+  const g = glyph('H');
+  for (let r = 15; r >= 0; r--) if (g.subarray(r * 8, r * 8 + 8).some(v => v)) { capBottom = r; break; }
+}
+// TEXT x,y,a$  – y ist die Grundlinie. opaque = JAM2 (Hintergrund in Farbe 0)
+function text(x, y, s, c, opaque = true) {
+  s = String(s);
+  if (opaque) pbox(x, y - 6, x + s.length * 8 - 1, y + 1, 0);
+  for (let i = 0; i < s.length; i++) {
+    const g = glyph(s[i]);
+    for (let r = 0; r < 16; r++) for (let q = 0; q < 8; q++)
+      if (g[r * 8 + q]) plot(x + i * 8 + q, y + r - capBottom, c);
+  }
+}
+
+/* ---------- Ausgabe auf die Leinwand ---------- */
+const img = ctx.createImageData(W, H);
+function render() {
+  if (dirty) {
+    dirty = false;
+    const lut = pal.map(([r, g, b]) => [r * 17, g * 17, b * 17]);
+    const d = img.data;
+    for (let i = 0, j = 0; i < fb.length; i++, j += 4) {
+      const p = lut[fb[i]];
+      d[j] = p[0]; d[j + 1] = p[1]; d[j + 2] = p[2]; d[j + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  requestAnimationFrame(render);
+}
+function fitCanvas() {
+  const maxW = window.innerWidth - 32, maxH = window.innerHeight - 70;
+  let s = Math.min(maxW / W, maxH / H);
+  if (s >= 2) s = Math.floor(s);
+  s = Math.max(s, 0.5);
+  cv.style.width = (W * s) + 'px'; cv.style.height = (H * s) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+
+/* ---------- Eingabe (MOUSE / INKEY$) ---------- */
+let waiter = null;
+function emit(ev) {
+  if (waiter && waiter.filter(ev)) { const w = waiter; waiter = null; w.resolve(ev); }
+}
+function waitEvent(filter) { return new Promise(res => { waiter = { filter, resolve: res }; }); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) * W / r.width);
+  const y = Math.floor((e.clientY - r.top) * H / r.height);
+  if (nameMode && e.pointerType !== 'mouse') nameInp.focus();
+  emit({ type: 'click', x, y });
+});
+window.addEventListener('keydown', e => {
+  if (nameMode) return;
+  if (e.key === ' ' || e.key === 'Enter') e.preventDefault();
+  emit({ type: 'key', key: e.key });
+});
+const inBox = (e, x0, y0, x1, y1) => e.type === 'click' && e.x > x0 && e.x < x1 && e.y > y0 && e.y < y1;
+
+/* ---------- FORM INPUT ---------- */
+const nameInp = document.getElementById('nameinput');
+let nameMode = false;
+// Tastatur wird direkt am Fenster gelesen; das unsichtbare Eingabefeld dient
+// nur dazu, auf Touch-Geräten die Bildschirmtastatur einzublenden.
+const clean = s => s.replace(/[^\x20-\x7e\xa0-\xff]/g, '');
+function formInput(x, y, len) {
+  return new Promise(resolve => {
+    nameMode = true;
+    let buf = '';
+    nameInp.value = ''; nameInp.maxLength = len;
+    let blink = true;
+    const redraw = () => {
+      pbox(x, y - 6, x + (len + 1) * 8 - 1, y + 1, 0);
+      text(x, y, buf, 1);
+      if (blink) pbox(x + buf.length * 8, y - 6, x + buf.length * 8 + 7, y + 1, 1);
+    };
+    const timer = setInterval(() => { blink = !blink; redraw(); }, 400);
+    const onInput = () => {               // Bildschirmtastatur (Handy/Tablet)
+      buf = clean(nameInp.value).slice(0, len);
+      blink = true; redraw();
+    };
+    const onKey = e => {
+      if (e.isComposing) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearInterval(timer);
+        window.removeEventListener('keydown', onKey, true);
+        nameInp.removeEventListener('input', onInput);
+        blink = false; redraw();
+        nameInp.blur();
+        // nameMode erst nach diesem Tastendruck zurücksetzen, sonst würfelt das Enter gleich
+        setTimeout(() => { nameMode = false; }, 0);
+        resolve(buf);
+        return;
+      }
+      if (e.target === nameInp) return;   // wird über 'input' verarbeitet
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Backspace') { e.preventDefault(); buf = buf.slice(0, -1); }
+      else if (e.key.length === 1 && clean(e.key) && buf.length < len) { e.preventDefault(); buf += e.key; }
+      else return;
+      blink = true; redraw();
+    };
+    window.addEventListener('keydown', onKey, true);
+    nameInp.addEventListener('input', onInput);
+    if (matchMedia('(pointer: coarse)').matches) nameInp.focus();
+    redraw();
+  });
+}
+
+/* =====================================================================
+   Daten (PROCEDURE daten)
+   ===================================================================== */
+const ANFENDE = [55, 25, 35, 45];
+const PRIORITY = [0,3,1,2,16,24,55,17,23,25,54,56,18,22,60,26,53,57,19,21,61,27,
+  52,58,20,62,28,12,51,59,63,29,4,15,13,50,30,7,5,
+  14,49,71,67,31,6,48,70,40,66,32,47,69,41,39,65,33,46,68,42,38,64,34,
+  45,43,37,35,44,36,8,11,9,10];
+const KOORD = [149,-70,163,-63,149,-56,135,-63,275,-7,289,0,275,7,261,0,
+  149,56,163,63,149,70,135,63, 23,-7,37,0,23,7,9,0,
+  93,-42,107,-35,121,-28,135,-21,149,-14,
+  163,-21,177,-28,191,-35,205,-42,
+  219,-35,233,-28,
+  219,-21,205,-14,191,-7,177,0,
+  191,7,205,14,219,21,233,28,
+  219,35,205,42,
+  191,35,177,28,163,21,149,14,
+  135,21,121,28,107,35,93,42,
+  79,35,65,28,
+  79,21,93,14,107,7,121,0,
+  107,-7,93,-14,79,-21,65,-28,79,-35,
+  93,-28,107,-21,121,-14,135,-7,
+  205,-28,191,-21,177,-14,163,-7,
+  205,28,191,21,177,14,163,7,
+  93,28,107,21,121,14,135,7];
+const PIPS = {
+  1: [2,2], 2: [1,1,3,3], 3: [1,1,2,2,3,3], 4: [1,1,3,1,1,3,3,3],
+  5: [1,1,3,1,2,2,1,3,3,3], 6: [1,1,3,1,1,2,3,2,1,3,3,3] };
+const POLX = [6,0,8,0,11,3,11,5,9,7,13,19,13,22,7,23,5,23,1,22,1,19,5,7,3,5,3,3,6,0];
+const polyx = POLX.filter((_, i) => i % 2 === 0), polyy = POLX.filter((_, i) => i % 2 === 1);
+// Ziffern, mit denen ziehbare Kegel markiert werden (eins/zwei/drei/vier)
+const ZIFFERN = [
+  [0,2,2,0,2,5],
+  [0,1,1,0,2,0,3,1,3,2,0,5,3,5],
+  [0,0,3,0,3,5,0,5,3,5,3,3,0,3],
+  [0,0,0,3,3,3,2,3,2,2,2,4]];
+
+/* =====================================================================
+   Variablen
+   ===================================================================== */
+let spieler = 4, splo = 0, w = 0;
+let figure = [], back = [], names = [];
+let field, fpos, rest, finish, platz, platzNr;
+const koordx = new Array(72), koordy = new Array(72);
+const spx = 140, spy = 120;
+
+/* =====================================================================
+   Prozeduren
+   ===================================================================== */
+function init() {
+  cls(0);
+  field = new Array(72).fill(0);
+  fpos = new Array(16).fill(0);
+  rest = [4, 4, 4, 4];
+  finish = [false, false, false, false];
+  platz = [0, 0, 0, 0]; platzNr = 0;
+  setcolor(0, 5, 5, 2);
+  setcolor(1, 5, 5, 2);
+  setcolor(7, 0, 0, 0);
+  setcolor(8, 14, 0, 0);    // rot
+  setcolor(9, 0, 14, 0);    // grün
+  setcolor(10, 4, 4, 15);   // blau
+  setcolor(11, 12, 12, 2);  // gelb
+  setcolor(12, 9, 2, 2);
+  setcolor(13, 2, 9, 2);
+  setcolor(14, 2, 2, 11);
+  setcolor(15, 9, 9, 2);
+  for (let n = 2; n <= 6; n++) setcolor(n, 0, 0, n * 2 + 3);
+  createfigure();
+}
+
+function createfigure() {           // Kegel zeichnen
+  for (let a = 0; a <= 3; a++) {
+    pcircle(6, 17, 4, 7);
+    for (let n = 0; n <= 12; n++) { draw(7, 6, 14, n, 32); drawTo(7, n, 35); }
+    pcircle(6, 17, 3, 8 + a);
+    for (let n = 1; n <= 11; n++) { draw(8 + a, 6, 18, n, 32); drawTo(8 + a, n, 34); }
+    draw(8 + a, 3, 35, 9, 35);
+    draw(7, 3, 36, 9, 36);
+    draw(1, 5, 15, 4, 16, 4, 17);
+    draw(1, 5, 24, 2, 32);
+    draw(12 + a, 8, 15, 9, 16, 9, 18, 7, 20, 7, 21);
+    draw(12 + a, 8, 22, 11, 32, 11, 34);
+    figure[a] = get(0, 13, 15, 36);
+    cls(0);
+  }
+}
+
+function gadget(col, x, y, s) {     // Hintergrundbox
+  const a = s.length * 8 + 6 + x, b = y + 14;
+  pbox(x, y, a, b, 5);
+  box(x, y, a, b, 3);
+  line(x + 1, y + 1, a - 1, y + 1, 6);
+  line(x + 1, y + 1, x + 1, b - 1, 6);
+  text(x + 3, y + 10, s, col, false);  // GRAPHMODE 0 (JAM1)
+}
+
+function whitebox(pos, c) {
+  pos--;
+  box(spx - 1 + pos * 17, spy - 1, spx + 15 + pos * 17, spy + 15, c);
+}
+
+async function title() {           // Titelbild
+  const a = 'MENSCH ÄRGERE DICH NICHT';
+  text(0, 255, a, 1);              // Farbe 1 = Hintergrundfarbe -> unsichtbar
+  let z = 0;
+  for (let y = 248; y <= 255; y++) {
+    z += 0.5;
+    const col = Math.trunc(z + 2);
+    for (let x = 0; x <= a.length * 8; x++) {
+      if (point(x, y) > 0) {
+        const xs = Math.trunc(x * 1.4 + 10), ys = y * 4;
+        pbox(xs + 11, ys - 950, xs + 12, ys - 946, col);
+      }
+    }
+    await sleep(70);
+  }
+  setcolor(1, 15, 15, 15);
+  pbox(0, 248, W - 1, 255, 0);     // TEXT 0,255,SPACE$(25)
+  z = 0;
+  for (let n = 0; n <= 300; n += 14) {
+    if (++z > 3) z = 0;
+    put(n, 0, figure[z]); put(n, 230, figure[z]);
+  }
+  z = 0;
+  for (let n = 23; n <= 230; n += 23) {
+    if (++z > 3) z = 0;
+    put(0, n, figure[z]); put(290, n, figure[z]);
+  }
+  text(55, 90, '(c) 1989 by Mike Hesser', 1);
+  text(spx - 70, spy + 10, 'Spieler', 1);
+  gadget(1, 130, 200, 'WEITER');
+  for (let n = 0; n <= 3; n++) gadget(1, spx + n * 17, spy, String(n + 1));
+  whitebox(spieler, 1);
+  for (;;) {
+    const e = await waitEvent(e => e.type === 'click' || (e.type === 'key' && /^[1-4]$|^Enter$/.test(e.key)));
+    let neu = 0;
+    if (e.type === 'key') {
+      if (e.key === 'Enter') break;
+      neu = +e.key;
+    } else {
+      if (e.x > spx && e.x < spx + 66 && e.y > spy && e.y < spy + 36) neu = Math.floor((e.x - spx) / 17) + 1;
+      if (e.x > 130 && e.x < 185 && e.y > 200 && e.y < 213) break;
+    }
+    if (neu) { whitebox(spieler, 0); spieler = neu; whitebox(spieler, 1); }
+  }
+}
+
+async function askplayers() {      // Spielernamen abfragen
+  pbox(50, 100, 280, 229, 0);
+  for (let n = 0; n < spieler; n++) {
+    gadget(1, 110, 100, (n + 1) + '.Spieler');
+    put(80, 120 + n * 24, figure[n]);
+    let v = await formInput(104, 126 + n * 24, 12);   // LOCATE 14,16+n*3
+    if (v.trim() === '') { v = 'FAULPELZ'; text(104, 126 + n * 24, v, 1); }
+    names[n] = v;
+  }
+}
+
+function initvar() {               // Kegelpositionen
+  for (let n = 0; n <= 15; n++) { field[n] = n + 1; fpos[n] = n; }
+}
+
+function saveback() {
+  for (let n = 0; n <= 71; n++) {
+    const x = koordx[n] + 5, y = koordy[n] - 22;
+    back[n] = get(x, y, x + 15, y + 23);
+  }
+}
+
+function showfield() {             // Spielfeld zeichnen
+  pbox(0, 0, 320, 256, 0);
+  setcolor(0, 0, 0, 0);
+  setcolor(1, 15, 15, 15);
+  const brx = 0, bry = 91, brw = 160, brh = 80;
+  draw(3, brx, bry, brx + brw, bry - brh, brx + 2 * brw, bry);
+  drawTo(3, brx + brw, bry + brh);
+  drawTo(6, brx, bry);
+  drawTo(3, brx, bry + 7); drawTo(3, brx + brw + 1, bry + brh + 7); drawTo(3, brx + 2 * brw, bry + 7);
+  drawTo(3, brx + 2 * brw, bry);
+  draw(3, brx + brw + 1, bry + brh, brx + brw + 1, bry + brh + 7);
+  fill(brx + 2, bry, 4);
+  fill(brx + 1, bry + 2, 5);
+  fill(brx + brw + 2, bry + brh + 2, 3);
+  for (let z = 0; z < 72; z++) {
+    const x = KOORD[z * 2] + brx, y = KOORD[z * 2 + 1] + bry;
+    koordx[z] = x; koordy[z] = y;
+    draw(0, x, y, x + 11, y - 5, x + 21, y, x + 10, y + 5, x, y);
+  }
+  for (let n = 16; n <= 55; n++) fill(koordx[n] + 3, koordy[n], 1);
+  for (let n = 0; n <= 3; n++) {
+    for (let a = 0; a <= 3; a++) {
+      fill(koordx[a + n * 4] + 3, koordy[a + n * 4], n + 8);
+      fill(koordx[a + n * 4 + 56] + 3, koordy[a + n * 4 + 56], n + 8);
+    }
+    fill(koordx[n * 10 + 16] + 3, koordy[n * 10 + 16], n + 8);
+  }
+  text(10, 10, names[0] || '', 8);
+  text(210, 10, names[1] || '', 9);
+  text(210, 170, names[2] || '', 10);
+  text(10, 170, names[3] || '', 11);
+}
+
+function showfigures() {           // Kegel zeichnen (von hinten nach vorn)
+  for (let n = 0; n <= 71; n++) {
+    const a = field[PRIORITY[n]];
+    if (a) {
+      const x = koordx[PRIORITY[n]] + 5, y = koordy[PRIORITY[n]] - 22;
+      polyfill(15, polyx, polyy, x - 1, y, 0);
+      put(x, y, figure[(a - 1) >> 2], 'xor');
+    }
+  }
+}
+
+function showmenu() {              // Menüfeld zeichnen
+  for (let n = 0; n <= 4; n++) pbox(n, 180 + n, 320 - n, 255 - n, n + 3);
+  for (let n = 0; n < spieler; n++) gadget(n + 8, 10, 186 + n * 16, names[n]);
+  prbox(255, 195, 301, 241, 1);
+  wuerfel(1);
+}
+
+function wuerfel(a) {              // Würfel zeichnen
+  pbox(260, 200, 296, 236, 1);
+  const p = PIPS[a];
+  for (let i = 0; i < p.length; i += 2) pcircle(p[i] * 12 + 254, p[i + 1] * 12 + 194, 3, 0);
+}
+
+const fput = (i, a) => put(koordx[i] + 5, koordy[i] - 22, a);
+
+function beat(j) {                 // j = Feldnummer
+  const a = togroup(j);
+  const b = posingroup(a);
+  field[b] = field[j];
+  fpos[field[j] - 1] = b;
+  fput(j, back[j]);
+  rest[a]++;
+}
+
+function move(n) {                 // n = Kegelnummer+1
+  n--;
+  let a = fpos[n];
+  fput(a, back[a]);                // Hintergrund zurückschreiben
+  field[a] = 0;                    // altes Feld löschen
+  a = nextfield(n);
+  fpos[n] = a;
+  if (field[a] > 0) beat(a);
+  field[a] = n + 1;
+  showfigures();
+}
+
+/* ---------- Funktionen ---------- */
+function nextfield(o) {            // o = Kegelnummer
+  let t = fpos[o] + w;
+  if (fpos[o] > splo * 4 + 55) {   // Kegel steht schon im Ziel
+    if (t > splo * 4 + 59) t = fpos[o];
+    return t;
+  }
+  if (t > ANFENDE[splo] && fpos[o] <= ANFENDE[splo]) {
+    t = splo * 4 + 56 + (w - (ANFENDE[splo] + 1 - fpos[o]));
+    if (t > splo * 4 + 59) t = fpos[o];
+  } else if (t > 55) t -= 40;
+  return t;
+}
+const togroup = h => (field[h] - 1) >> 2;
+const posingroup = p => p * 4 + rest[p];
+// -1, wenn Feld h mit eigenem Kegel besetzt ist, sonst 0
+const testfield = h => (field[h] < splo * 4 + 1 || field[h] > splo * 4 + 4) ? 0 : -1;
+function testfinish() {
+  let z = 0;
+  for (let n = 0; n <= 3; n++) if (field[splo * 4 + 56 + n] > 0) z++;
+  return z === 4 ? -1 : 0;
+}
+
+/* ---------- eigentliches Spiel ---------- */
+async function game() {
+  const wx = 170, wy = 186;
+  for (;;) {
+    for (splo = 0; splo < spieler; splo++) {
+      if (finish[splo]) continue;
+      w = 0;
+      text(114, 195 + splo * 14, 'am Zug', 1);
+      let tr = rest[splo] < 4 ? 1 : 3;
+      do {
+        gadget(1, wx, wy + splo * 14, tr + 'xWÜRFELN');
+        do {
+          const gy = wy + splo * 14;
+          await waitEvent(e => inBox(e, wx, gy, wx + 78, gy + 15) ||
+            (e.type === 'key' && (e.key === ' ' || e.key === 'Enter')));
+          for (let n = 1; n <= 10; n++) { wuerfel(rnd6()); await sleep(35); }
+          w = rnd6();
+          wuerfel(w);
+          tr--;
+          gadget(1, wx, gy, tr + 'xWÜRFELN');
+        } while (!(tr === 0 || w === 6));
+
+        const h = splo * 10 + 16;
+        if (testfield(h) === 0 && rest[splo] > 0 && w === 6) {
+          await sleep(250);
+          if (field[h] !== 0) beat(h);
+          const n = posingroup(splo) - 1;
+          field[h] = field[n];
+          rest[splo]--;
+          fput(n, back[n]);
+          fpos[field[n] - 1] = h;
+          field[n] = 0;
+          showfigures();
+        } else if (rest[splo] < 4) {
+          const merke = [0, 0, 0, 0];
+          let z = 0;
+          for (let n = 0; n <= 3; n++) {
+            const b = n + splo * 4;
+            if (fpos[b] > 15 && testfield(nextfield(b)) === 0) {
+              merke[z] = b + 1;
+              const p = ZIFFERN[z];
+              z++;
+              const kx = koordx[fpos[b]] + 10, ky = koordy[fpos[b]] - 6;
+              draw(1, kx + p[0], ky + p[1]);
+              for (let i = 2; i < p.length; i += 2) drawTo(1, kx + p[i], ky + p[i + 1]);
+            }
+          }
+          let wahl = 1;
+          if (z > 1) wahl = await choosePiece(merke, z);
+          else if (z === 1) await sleep(350);
+          if (merke[wahl - 1] > 0) move(merke[wahl - 1]);
+          if (testfinish() === -1) finish[splo] = true;
+        }
+        tr = 1;
+        if (finish[splo]) break;     // fertig: kein weiterer Wurf
+      } while (w === 6);
+
+      text(114, 195 + splo * 14, '      ', 1);
+      pbox(wx, wy + splo * 14, wx + 78, wy + splo * 14 + 15, 0);
+      if (finish[splo] && !platz[splo]) {
+        platz[splo] = ++platzNr;
+        text(114, 195 + splo * 14, platzNr + '.PLATZ', splo + 8);
+        const offen = finish.slice(0, spieler).filter(f => !f).length;
+        if (offen <= (spieler > 1 ? 1 : 0)) return;
+      }
+    }
+  }
+}
+const rnd6 = () => Math.floor(Math.random() * 6) + 1;
+
+// Taste 1..z – oder Klick auf einen der markierten Kegel
+async function choosePiece(merke, z) {
+  const hit = e => {
+    if (e.type === 'key') return /^[1-9]$/.test(e.key) && +e.key <= z;
+    if (e.type !== 'click') return false;
+    return pieceAt(e.x, e.y, merke, z) > 0;
+  };
+  const e = await waitEvent(hit);
+  return e.type === 'key' ? +e.key : pieceAt(e.x, e.y, merke, z);
+}
+function pieceAt(x, y, merke, z) {
+  let best = 0, bestPrio = -1;
+  for (let i = 0; i < z; i++) {
+    const f = fpos[merke[i] - 1];
+    const fx = koordx[f] + 5, fy = koordy[f] - 22;
+    const inSprite = x >= fx && x <= fx + 13 && y >= fy && y <= fy + 23;
+    const inField = Math.abs(x - (koordx[f] + 10.5)) / 11 + Math.abs(y - koordy[f]) / 5.5 <= 1;
+    if (inSprite || inField) {
+      const prio = PRIORITY.indexOf(f);
+      if (prio > bestPrio) { bestPrio = prio; best = i + 1; }
+    }
+  }
+  return best;
+}
+
+async function spielende() {
+  const s = 'SPIELENDE';
+  gadget(1, 160 - (s.length * 8 + 6) / 2, 84, s);
+  await sleep(600);
+  await waitEvent(e => e.type === 'click' || (e.type === 'key' && (e.key === ' ' || e.key === 'Enter')));
+}
+
+/* ---------- Hauptprogramm ---------- */
+async function main() {
+  try { await Promise.race([document.fonts.load(FONT, 'MÄÜ'), sleep(3000)]); } catch (_) {}
+  if (!document.fonts.check(FONT, 'M')) FONT = 'bold 8px monospace';
+  calibrateFont();
+  fitCanvas();
+  requestAnimationFrame(render);
+  for (;;) {
+    init();
+    await title();
+    await askplayers();
+    showfield();
+    initvar();
+    saveback();
+    showfigures();
+    showmenu();
+    await game();
+    await spielende();
+  }
+}
+main();
+</script>
+</body>
+</html>

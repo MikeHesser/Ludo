@@ -1,0 +1,583 @@
+'
+' Mensch ärgere dich nicht
+'
+' 22.09.89
+'
+GOSUB init
+GOSUB title
+GOSUB askplayers
+GOSUB showfield
+GOSUB initvar
+GOSUB saveback
+GOSUB showfigures
+GOSUB showmenu
+GOSUB game
+END
+> PROCEDURE init                 !Initialisierung (Farben,Variablen)
+  LOCAL n|,x&,y&
+  OPENS 1,0,0,320,256,4,0
+  OPENW #1,0,0,320,256,0,2048+4096+65536
+  TITLEW #1,""
+  COLOR 0
+  '
+  DIM figure$(3),back$(71),name$(3),prior&(71),koordx&(71),koordy&(71)
+  DIM rest|(3),merke|(3),fpos&(15)
+  DIM polyx&(20),polyy&(20),finish!(3),anfend|(3)
+  RESTORE polx
+  CLR n|
+  DO
+    READ x&,y&
+    EXIT IF x&=-1
+    polyx&(n|)=x&
+    polyy&(n|)=y&
+    INC n|
+  LOOP
+  DIM field&(71)
+  spieler=4
+  '
+  PBOX 0,0,320,10
+  SETCOLOR 0,5,5,2
+  SETCOLOR 1,5,5,2
+  SETCOLOR 7,0,0,0
+  SETCOLOR 8,14,0,0   !red player
+  SETCOLOR 9,0,14,0   !green player
+  SETCOLOR 10,4,4,15   !blue player
+  SETCOLOR 11,12,12,2  !yellow player
+  SETCOLOR 12,9,2,2
+  SETCOLOR 13,2,9,2
+  SETCOLOR 14,2,2,11
+  SETCOLOR 15,9,9,2
+  RESTORE anfende
+  FOR n|=0 TO 3
+    READ anfend|(n|)
+  NEXT n|
+  FOR n|=2 TO 6
+    SETCOLOR n|,0,0,n|*2+3
+  NEXT n|
+  RESTORE priority
+  FOR n|=0 TO 71
+    READ prior&(n|)
+  NEXT n|
+  FOR n|=0 TO 3
+    rest|(n|)=4
+  NEXT n|
+  GOSUB createfigure
+RETURN
+> PROCEDURE title                !Titelbild
+  LOCAL z,a|,x&,y&,n&
+  COLOR 1
+  a$="MENSCH ÄRGERE DICH NICHT"
+  TEXT 0,255,a$
+  CLR z
+  FOR y&=248 TO 255 !255
+    z=z+0.5
+    COLOR z+2
+    FOR x&=0 TO MUL(LEN(a$),8)
+      a|=POINT(x&,y&)
+      IF a|>0
+        xs&=x&*1.4+10
+        ys&=y&*4
+        PBOX xs&+11,ys&-950,xs&+12,ys&-946
+      ENDIF
+    NEXT x&
+  NEXT y&
+  SETCOLOR 1,15,15,15
+  TEXT 0,255,SPACE$(25)
+  SETCOLOR 1,15,15,15
+  FOR n&=0 TO 300 STEP 14
+    INC z
+    IF z>3
+      CLR z
+    ENDIF
+    PUT n&,0,figure$(z)
+    PUT n&,230,figure$(z)
+  NEXT n&
+  CLR z
+  FOR n&=23 TO 230 STEP 23
+    INC z
+    IF z>3
+      CLR z
+    ENDIF
+    PUT 0,n&,figure$(z)
+    PUT 290,n&,figure$(z)
+  NEXT n&
+  COLOR 1
+  spx&=140
+  spy&=120
+  TEXT 55,90,"(c) 1989 by Mike Hesser"
+  TEXT spx&-70,spy&+10,"Spieler"
+  GOSUB gadget(1,130,200,"WEITER")
+  FOR n&=0 TO 3
+    gadget(1,spx&+n&*17,spy&,STR$(n&+1))
+  NEXT n&
+  GOSUB whitebox(spieler)
+  DO
+    MOUSE x&,y&,k&
+    IF k&=1
+      IF x&>spx& AND x&<spx&+66
+        IF y&>spy& AND y&<spy&+36
+          COLOR 0
+          GOSUB whitebox(spieler)
+          spieler=(x&-spx&)\17+1
+          COLOR 1
+          GOSUB whitebox(spieler)
+        ENDIF
+      ENDIF
+      EXIT IF x&>130 AND x&<185 AND y&>200 AND y&<213
+    ENDIF
+  LOOP
+RETURN
+> PROCEDURE whitebox(pos)        !Umrahmung
+  DEC pos
+  BOX spx&-1+pos*17,spy&-1,spx&+15+pos*17,spy&+15
+RETURN
+> PROCEDURE closescreens         !Quit
+  CLOSEW #1
+  CLOSES 1
+RETURN
+> PROCEDURE gadget(col,x,y,a$)   !Hintergrundbox
+  LOCAL a&,b&
+  a&=LEN(a$)*8+6+x
+  b&=y+14
+  COLOR 5
+  PBOX x,y,a&,b&
+  COLOR 3
+  BOX x,y,a&,b&
+  COLOR 6
+  LINE x+1,y+1,PRED(a&),y+1
+  LINE x+1,y+1,x+1,PRED(b&)
+  GRAPHMODE 0
+  COLOR col
+  TEXT x+3,y+10,a$
+  GRAPHMODE 1
+RETURN
+> PROCEDURE createfigure         !Kegel zeichnen
+  FOR a=0 TO 3
+    COLOR 7
+    PCIRCLE 6,17,4
+    FOR n=0 TO 12
+      DRAW 6,14 TO n,32
+      DRAW  TO n,35
+    NEXT n
+    GET 0,13,15,36,t$
+    COLOR 8+a
+    PCIRCLE 6,17,3
+    FOR n=1 TO 11
+      DRAW 6,18 TO n,32
+      DRAW  TO n,34
+    NEXT n
+    DRAW 3,35 TO 9,35
+    COLOR 7
+    DRAW 3,36 TO 9,36
+    COLOR 1
+    DRAW 5,15 TO 4,16 TO 4,17
+    DRAW 5,24 TO 2,32
+    COLOR 12+a
+    DRAW 8,15 TO 9,16 TO 9,18 TO 7,20 TO 7,21
+    DRAW 8,22 TO 11,32 TO 11,34
+    GET 0,13,15,36,a$
+    figure$(a)=a$
+    CLS
+  NEXT a
+RETURN
+> PROCEDURE askplayers           !Spielernamen abfragen
+  COLOR 0
+  PBOX 50,100,280,229
+  FOR n=0 TO spieler-1
+    gadget(1,110,100,STR$(n+1)+".Spieler")
+    PUT 80,120+n*24,figure$(n)
+    LOCATE 14,16+n*3
+    FORM INPUT 12,name$(n)
+    IF TRIM$(name$(n))=""
+      LET name$(n)="FAULPELZ"
+    ENDIF
+  NEXT n
+RETURN
+> PROCEDURE initvar              !Kegelpositionen
+  FOR n=0 TO 15
+    field&(n)=n+1
+    fpos&(n)=n
+  NEXT n
+RETURN
+> PROCEDURE saveback
+  LOCAL n|
+  FOR n|=0 TO 71
+    x&=koordx&(n|)+5
+    y&=koordy&(n|)-22
+    GET x&,y&,x&+15,y&+23,back$(n|)
+  NEXT n|
+RETURN
+> PROCEDURE showfield            !Spielfeld zeichnen
+  COLOR 0
+  PBOX 0,0,320,256
+  SETCOLOR 0,0,0,0
+  SETCOLOR 1,15,15,15
+  COLOR 1
+  brx=0
+  bry=91
+  brw=160
+  brh=80
+  COLOR 3
+  DRAW brx,bry TO brx+brw,bry-brh TO brx+2*brw,bry
+  DRAW  TO brx+brw,bry+brh
+  COLOR 6
+  DRAW  TO brx,bry
+  COLOR 3
+  DRAW  TO brx,bry+7 TO brx+brw+1,bry+brh+7 TO brx+2*brw,bry+7
+  DRAW  TO brx+2*brw,bry
+  DRAW brx+brw+1,bry+brh TO brx+brw+1,bry+brh+7
+  COLOR 4
+  FILL brx+2,bry
+  COLOR 5
+  FILL brx+1,bry+2
+  COLOR 3
+  FILL brx+brw+2,bry+brh+2
+  RESTORE koord
+  COLOR 0
+  CLR z
+  DO
+    READ x&,y&
+    EXIT IF x&=-1
+    ADD x&,brx
+    ADD y&,bry
+    koordx&(z)=x&
+    koordy&(z)=y&
+    INC z
+    DRAW x&,y& TO x&+11,y&-5 TO x&+21,y& TO x&+10,y&+5 TO x&,y&
+  LOOP
+  COLOR 1
+  FOR n=16 TO 55
+    FILL koordx&(n)+3,koordy&(n)
+  NEXT n
+  z=1
+  FOR n=0 TO 3
+    COLOR n+8
+    FOR a=0 TO 3
+      FILL koordx&(a+n*4)+3,koordy&(a+n*4)
+      FILL koordx&(a+n*4+56)+3,koordy&(a+n*4+56)
+      INC z
+    NEXT a
+    FILL koordx&(n*10+16)+3,koordy&(n*10+16)
+  NEXT n
+  COLOR 8
+  TEXT 10,10,name$(0)
+  COLOR 9
+  TEXT 210,10,name$(1)
+  COLOR 10
+  TEXT 210,170,name$(2)
+  COLOR 11
+  TEXT 10,170,name$(3)
+RETURN
+> PROCEDURE showfigures          !Kegeln zeichnen
+  LOCAL a|,b&,n|,x&,y&
+  COLOR 0
+  FOR n|=0 TO 71
+    a|=field&(prior&(n|))
+    IF a|
+      x&=koordx&(prior&(n|))+5
+      y&=koordy&(prior&(n|))-22
+      POLYFILL 15,polyx&(),polyy&() OFFSET x&-1,y&
+      PUT x&,y&,figure$(PRED(a|)\4),&H60
+    ENDIF
+  NEXT n|
+RETURN
+> PROCEDURE showmenu             !Menüfeld zeichnen
+  FOR n=0 TO 4
+    COLOR n+3
+    PBOX n,180+n,320-n,255-n
+  NEXT n
+  FOR n=0 TO spieler-1
+    gadget(n+8,10,186+n*16,name$(n))
+  NEXT n
+  COLOR 1
+  PRBOX 255,195,301,241
+  wuerfel(1)
+RETURN
+> PROCEDURE game                 !eigentliches Spiel
+  wx&=170
+  wy&=186
+  '
+  DO
+    FOR splo=0 TO spieler-1
+      IF finish!(splo)=0
+        CLR w|
+        COLOR 1
+        TEXT 114,195+splo*14,"am Zug"
+        IF rest|(splo)<4
+          try|=1
+        ELSE
+          try|=3
+        ENDIF
+        DO
+          gadget(1,wx&,wy&+splo*14,STR$(try|)+"xWÜRFELN")
+          '
+          IF 0
+            loop:
+            a$=""
+            WHILE a$=""
+              a$=INKEY$
+            WEND
+            w|=ASC(a$)
+            IF w|<49
+              a$=""
+              GOTO loop
+            ENDIF
+            SUB w|,48
+          ELSE
+            DO
+              CLR w|
+              MOUSE x&,y&,k&
+              IF x&>wx& AND x&<wx&+78 AND k&=1
+                IF y&>wy&+splo*14 AND y&<wy&+splo*14+15
+                  FOR n|=1 TO 10
+                    wuerfel(RAND(6)+1)
+                  NEXT n|
+                  w|=RAND(6)+1
+                  GOSUB wuerfel(w|)
+                  DEC try|
+                  gadget(1,wx&,wy&+splo*14,STR$(try|)+"xWÜRFELN")
+                ENDIF
+              ENDIF
+            LOOP UNTIL try|=0 OR w|=6
+          ENDIF
+          '
+          h|=splo*10+16
+          IF @testfield(h|)=0 AND rest|(splo)>0 AND w|=6
+            IF field&(h|)<>0
+              beat(h|)
+            ENDIF
+            n|=@posingroup(splo)-1
+            field&(h|)=field&(n|)
+            DEC rest|(splo)
+            fput(n|,back$(n|))
+            fpos&(field&(n|)-1)=h|
+            field&(n|)=0
+            showfigures
+          ELSE
+            IF rest|(splo)<4
+              CLR z|
+              ARRAYFILL merke|(),0
+              FOR n|=0 TO 3
+                b|=n|+splo*4
+                IF fpos&(b|)>15 AND @testfield(@nextfield(b|))=0
+                  merke|(z|)=b|+1
+                  INC z|
+                  SELECT z|
+                  CASE 1
+                    RESTORE eins
+                  CASE 2
+                    RESTORE zwei
+                  CASE 3
+                    RESTORE drei
+                  CASE 4
+                    RESTORE vier
+                  ENDSELECT
+                  READ a|
+                  READ x&,y&
+                  kx&=koordx&(fpos&(b|))+10
+                  ky&=koordy&(fpos&(b|))-6
+                  PLOT kx&+x&,ky&+y&
+                  FOR h|=1 TO a|-1
+                    READ x&,y&
+                    DRAW  TO kx&+x&,ky&+y&
+                  NEXT h|
+                ENDIF
+              NEXT n|
+              IF z|>1
+                a$=""
+                WHILE a$<"1" OR a$>CHR$(z|+48)
+                  a$=INKEY$
+                WEND
+              ELSE
+                a$="1"
+              ENDIF
+              IF merke|(ASC(a$)-49)>0
+                move(merke|(ASC(a$)-49))
+              ENDIF
+              IF @testfinish=-1
+                finish!(splo)=TRUE
+              ENDIF
+            ENDIF
+          ENDIF
+          try|=1
+        LOOP UNTIL w|<>6
+        '
+        TEXT 114,195+splo*14,"      "
+        COLOR 0
+        PBOX wx&,wy&+splo*14,ADD(wx&,78),ADD(wy&+splo*14,15)
+      ENDIF
+    NEXT splo
+  LOOP
+RETURN
+> PROCEDURE beat(j|)             !j|=Feldnummer
+  LOCAL a|,b|
+  a|=@togroup(j|)
+  b|=@posingroup(a|)
+  field&(b|)=field&(j|)
+  fpos&(field&(j|)-1)=b|
+  @fput(j|,back$(j|))
+  INC rest|(a|)
+RETURN
+> PROCEDURE fput(i|,a$)
+  PUT koordx&(i|)+5,koordy&(i|)-22,a$
+RETURN
+> PROCEDURE wuerfel(a)           !WÜrfel zeichnen
+  LOCAL x|,y|,n|
+  COLOR 1
+  PBOX 260,200,296,236
+  SELECT a
+  CASE 1
+    RESTORE one
+  CASE 2
+    RESTORE two
+  CASE 3
+    RESTORE three
+  CASE 4
+    RESTORE four
+  CASE 5
+    RESTORE five
+  CASE 6
+    RESTORE six
+  ENDSELECT
+  COLOR 0
+  FOR n|=1 TO a
+    READ x|,y|
+    PCIRCLE x|*12+254,y|*12+194,3
+  NEXT n|
+RETURN
+> PROCEDURE daten                !Daten fuer Spielfelder und Objects
+  '
+  anfende:
+  DATA 55,25,35,45
+  '
+  ' Hilfstabelle zum Aufbauen der Spielsteine
+  '
+  priority:
+  DATA 0,3,1,2,16,24,55,17,23,25,54,56,18,22,60,26,53,57,19,21,61,27
+  DATA 52,58,20,62,28,12,51,59,63,29,4,15,13,50,30,7,5
+  DATA 14,49,71,67,31,6,48,70,40,66,32,47,69,41,39,65,33,46,68,42,38,64,34
+  DATA 45,43,37,35,44,36,8,11,9,10
+  '
+  ' Koordinaten der Spielfelder
+  '
+  koord:
+  DATA 149,-70,163,-63,149,-56,135,-63,275,-7,289,0,275,7,261,0
+  DATA 149,56,163,63,149,70,135,63, 23,-7,37,0,23,7,9,0
+  '
+  DATA 93,-42,107,-35,121,-28,135,-21,149,-14
+  DATA 163,-21,177,-28,191,-35,205,-42
+  DATA 219,-35,233,-28
+  DATA 219,-21,205,-14,191,-7,177,0
+  DATA 191,7,205,14,219,21,233,28
+  DATA 219,35,205,42
+  DATA 191,35,177,28,163,21,149,14
+  DATA 135,21,121,28,107,35,93,42
+  DATA 79,35,65,28
+  DATA 79,21,93,14,107,7,121,0
+  DATA 107,-7,93,-14,79,-21,65,-28,79,-35
+  DATA 93,-28,107,-21,121,-14,135,-7
+  DATA 205,-28,191,-21,177,-14,163,-7
+  DATA 205,28,191,21,177,14,163,7
+  DATA 93,28,107,21,121,14,135,7
+  DATA -1,-1
+  '
+  one:
+  DATA 2,2
+  two:
+  DATA 1,1,3,3
+  three:
+  DATA 1,1,2,2,3,3
+  four:
+  DATA 1,1,3,1,1,3,3,3
+  five:
+  DATA 1,1,3,1,2,2,1,3,3,3
+  six:
+  DATA 1,1,3,1,1,2,3,2,1,3,3,3
+  '
+  polx:
+  DATA 6,0,8,0,11,3,11,5,9,7,13,19,13,22,7,23,5,23,1,22,1,19,5,7,3,5,3,3,6,0
+  DATA -1,-1
+  '
+  eins:
+  DATA 3 ,0,2,2,0,2,5
+  zwei:
+  DATA 7 ,0,1,1,0,2,0,3,1,3,2,0,5,3,5
+  drei:
+  DATA 7, 0,0,3,0,3,5,0,5,3,5,3,3,0,3
+  vier:
+  DATA 6, 0,0,0,3,3,3,2,3,2,2,2,4
+RETURN
+> PROCEDURE move(n|)             !n|=Kegelnummer-1
+  LOCAL a|,b|
+  DEC n|
+  a|=fpos&(n|)
+  @fput(a|,back$(a|))            !Hintergrund zurückschreiben
+  field&(a|)=0                   !Altes Feld löschen
+  a|=@nextfield(n|)
+  fpos&(n|)=a|
+  IF field&(a|)>0
+    @beat(a|)
+  ENDIF
+  field&(a|)=n|+1
+  showfigures
+RETURN
+> PROCEDURE trac                 !Trace
+  IF flag
+    PRINT AT(1,28);TRACE$;SPACE$(60-LEN(TRACE$))
+    WHILE INKEY$=""
+    WEND
+  ENDIF
+RETURN
+'
+'  Funktionen
+'
+FUNCTION nextfield(o|)           !Kegelnummer
+  t|=fpos&(o|)+w|
+  IF fpos&(o|)>splo*4+55
+    IF t|>splo*4+59
+      t|=fpos&(o|)
+    ENDIF
+    RETURN t|
+  ENDIF
+  IF t|>anfend|(splo) AND fpos&(o|)<=anfend|(splo)
+    t|=splo*4+56+(w|-(SUCC(anfend|(splo))-fpos&(o|)))
+    IF t|>splo*4+59
+      t|=fpos&(o|)
+    ENDIF
+  ELSE IF t|>55
+    SUB t|,40
+  ENDIF
+  RETURN t|
+ENDFUNC
+' wandelt eine Kegelnummer in eine Gruppennummer um
+FUNCTION togroup(h|)
+  RETURN PRED(field&(h|))\4
+ENDFUNC
+'
+' bestimmt die Position des Kegels in seiner Gruppe
+FUNCTION posingroup(pos|)
+  RETURN pos|*4+rest|(pos|)
+ENDFUNC
+' Testet, ob Anfangsfeld mit eigenem Kegel besetzt ist
+' wenn ja, dann -1 andernfalls 0
+FUNCTION testfield(h|)
+  IF field&(h|)<splo*4+1 OR field&(h|)>splo*4+4
+    RETURN 0
+  ELSE
+    RETURN -1
+  ENDIF
+ENDFUNC
+'
+FUNCTION testfinish
+  CLR z|
+  FOR n|=0 TO 3
+    IF field&(splo*4+56+n|)>0
+      INC z|
+    ENDIF
+  NEXT n|
+  IF z|=4
+    RETURN -1
+  ELSE
+    RETURN 0
+  ENDIF
+ENDFUNC
